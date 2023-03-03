@@ -1,6 +1,5 @@
 # Load Packages and setup wandb
 from params import params
-from torch.utils import data
 import loader
 from loader import SpellingDataset
 import json, os, random
@@ -12,7 +11,6 @@ import numpy as np
 
 from transformers import AutoConfig, AutoModel
 
-from sklearn.metrics import confusion_matrix, classification_report
 
 np.random.seed(params.seed)
 random.seed(params.seed)
@@ -34,6 +32,7 @@ if not params.dummy_run and params.wandb:
     wandb.config.update(params)
 
 def train(model, dataset, criterion):
+
     model.train()
     train_losses = []
     num_batch = 0
@@ -57,6 +56,7 @@ def train(model, dataset, criterion):
     return np.average(train_losses)
 
 def evaluate(model, dataset, criterion):
+
     model.eval()
     valid_losses = []
     predicts = []
@@ -96,40 +96,52 @@ def evaluate(model, dataset, criterion):
 dataset = SpellingDataset()
 dataset = dataset.alphabet_wise_datasets
 print(len(dataset)," datasets of Sizes:", len(dataset['a'][0]), len(dataset['a'][1]))
-# assert len(set(len(x[0]) for x in dataset.values())) == 1, set(len(x[0]) for x in dataset.values())
-# assert len(set(len(x[1]) for x in dataset.values())) == 1, set(len(x[1]) for x in dataset.values())
 
 print("Dataset created")
-os.system("nvidia-smi")
 
 
 ########## Create model #############
 
-trained_embeddings = torch.load("gpt-j-6B.Embedding.pth")
+# trained_embeddings = torch.load("gpt-j-6B.Embedding.pth")
 if params.control:
-    trained_embeddings = torch.normal(0, 0.01, size=(100000, trained_embeddings.shape[1]))
+    trained_embeddings = torch.normal(0, 0.01, size=(100000, 512)) # 512 is clip,t5 embedding size
 
 class SpellingModel(nn.Module):
     def __init__(self):
         super(SpellingModel, self).__init__()
         if params.control or 'EleutherAI/gpt-j' in params.model_card:
+        # if  'EleutherAI/gpt-j' in params.model_card:
             global trained_embeddings
-            self.gptj_config = AutoConfig.from_pretrained('EleutherAI/gpt-j-6B')
+            self.gptj_config = AutoConfig.from_pretrained('openai/clip-vit-base-patch32')
             # assert self.gptj_config.vocab_size == trained_embeddings.shape[0], (self.gptj_config.vocab_size, trained_embeddings.shape)
 
             self.frozen_embeddings = nn.Embedding.from_pretrained(trained_embeddings, freeze=True)
             print(self.frozen_embeddings.weight.shape)
 
             self.n_dims = trained_embeddings.shape[1]
-        else:
-            trained_embeddings = list(AutoModel.from_pretrained(params.model_card).named_parameters())[0]
-            assert trained_embeddings[0] in ['embeddings.word_embeddings.weight', 'wte.weight']
+        elif 'clip' in params.model_card:
+            from transformers import CLIPTextModel
+            clip_model = CLIPTextModel.from_pretrained(params.model_card)
+            trained_embeddings = list(clip_model.named_parameters())[0]
+            # trained_embeddings = list(AutoModel.from_pretrained(params.model_card).named_parameters())[0]
+
+            assert trained_embeddings[0] in ['text_model.embeddings.token_embedding.weight','embeddings.token_embedding.weight', 'wte.weight']
             trained_embeddings[1].requires_grad = False
 
             self.frozen_embeddings = nn.Embedding.from_pretrained(trained_embeddings[1], freeze=True)
 
             self.n_dims = trained_embeddings[1].shape[1]
+        else: # t5
 
+            trained_embeddings = list(AutoModel.from_pretrained(params.model_card).named_parameters())[0]
+
+            assert trained_embeddings[0] in ['text_model.embeddings.token_embedding.weight',
+                                             'embeddings.token_embedding.weight', 'wte.weight', 'shared.weight']
+            trained_embeddings[1].requires_grad = False
+
+            self.frozen_embeddings = nn.Embedding.from_pretrained(trained_embeddings[1], freeze=True)
+
+            self.n_dims = trained_embeddings[1].shape[1]
 
         self.ff = nn.Sequential(nn.Linear(self.n_dims, self.n_dims),
                                 nn.SELU(),
@@ -161,8 +173,9 @@ dev_dicts = {}
 
 import json
 json.dump(dataset, open(folder + "/dataset.json", 'w+'))
+
 for c in string.ascii_lowercase:
-    # if c != 'z': continue
+    # if c == 'w': continue
     print("###########")
     print("Starting:", c)
     print("###########")
@@ -175,6 +188,7 @@ for c in string.ascii_lowercase:
     print("Model created")
 
     criterion = torch.nn.BCEWithLogitsLoss().to(params.device)
+    # criterion = torch.nn.BCEWithLogitsLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=params.lr)
 
     split = int(0.8 * len(dataset[c][0]))
@@ -219,7 +233,7 @@ for c in string.ascii_lowercase:
             wandb.log(wandb_dict)
 
     # Store preds
-    print("EVALUATING:")
+    print("EVALUATING ON TEST SET:")
     valid_loss, confuse_mat, classify_report = evaluate(model, dataset[c][1], criterion)
     test_dicts[c] = classify_report
 
@@ -258,7 +272,7 @@ for c in string.ascii_lowercase:
             open(folder + f"/preds_{c}.json", 'w+'))
     # torch.save(model, "model.pt")
 
-assert len(test_dicts) == 26
+assert len(test_dicts) == 25
 
 # Following 1-liner is the worst piece of code you will ever see.
 test_dicts_aggr = {k1 :
