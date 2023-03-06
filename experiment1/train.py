@@ -102,7 +102,7 @@ print("Dataset created")
 
 ########## Create model #############
 
-# trained_embeddings = torch.load("gpt-j-6B.Embedding.pth")
+trained_embeddings = torch.load("gpt-j-6B.Embedding.pth")
 if params.control:
     trained_embeddings = torch.normal(0, 0.01, size=(100000, 512)) # 512 is clip,t5 embedding size
 
@@ -272,7 +272,7 @@ for c in string.ascii_lowercase:
             open(folder + f"/preds_{c}.json", 'w+'))
     # torch.save(model, "model.pt")
 
-assert len(test_dicts) == 25
+assert len(test_dicts) == 26
 
 # Following 1-liner is the worst piece of code you will ever see.
 test_dicts_aggr = {k1 :

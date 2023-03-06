@@ -18,7 +18,7 @@ basepath = "/".join(os.path.realpath(__file__).split('/')[:-1])
 
 if 'clip' in params.model_card:
     regex_pattern = r'[a-zA-Z]+$'
-if 'bert-' not in params.model_card:
+elif 'bert-' not in params.model_card:
     regex_pattern = r'Ġ?[a-zA-Z]+$'
 else:
     regex_pattern = r'#*[a-zA-Z]+$'
@@ -94,7 +94,7 @@ class SpellingDataset:
         if params.dummy_run:
             all_data = all_data[:5]
         return [(x[0], x[1],
-                 int(c in do_lowercase(x[0])))
+                 int(c in do_lowercase(x[0].replace("</w>",""))))
                 for x in all_data]
 
 
